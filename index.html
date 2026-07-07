@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Juggler Tracker</title>
+<style>
+  :root { --bg:#111418; --panel:#1a1f26; --text:#e8e6e0; --dim:#8a94a3; --accent:#e8b03c;
+          --hi:#e05252; --mid:#e8b03c; --low:#3a4453; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font-family:"Hiragino Kaku Gothic ProN",system-ui,sans-serif; font-size:13px; }
+  header { padding:12px 14px 8px; }
+  h1 { font-size:16px; color:var(--accent); display:inline; }
+  header .sub { color:var(--dim); font-size:11px; margin-top:4px; }
+  nav { display:flex; gap:2px; padding:6px 8px 0; overflow-x:auto; border-bottom:1px solid #2a3038; }
+  nav button { background:none; border:none; color:var(--dim); padding:8px 12px; cursor:pointer;
+               font-size:13px; border-bottom:2px solid transparent; white-space:nowrap; }
+  nav button.on { color:var(--text); border-color:var(--accent); }
+  main { padding:12px 10px 60px; max-width:1000px; margin:auto; }
+  .tw { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { padding:6px 8px; text-align:right; border-bottom:1px solid #232a33; white-space:nowrap; }
+  th { color:var(--dim); font-weight:normal; font-size:11px; }
+  td:first-child, th:first-child, td.l, th.l { text-align:left; }
+  tr.hi td { background:rgba(224,82,82,.13); }
+  tr.mid td { background:rgba(232,176,60,.10); }
+  .pill { display:inline-block; min-width:46px; text-align:center; padding:2px 7px; border-radius:10px; font-size:11px; }
+  .pill.hi { background:var(--hi); color:#fff; } .pill.mid { background:var(--mid); color:#111; }
+  .pill.low { background:var(--low); color:var(--dim); } .pill.na { color:var(--dim); }
+  .note { color:var(--dim); margin:8px 2px; font-size:11px; line-height:1.5; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin-top:10px; }
+  .card { background:var(--panel); border-radius:8px; padding:10px 12px; }
+  .card h3 { font-size:12px; color:var(--dim); margin-bottom:8px; font-weight:normal; }
+  .bar { height:7px; background:#2a3038; border-radius:4px; overflow:hidden; margin:3px 0 7px; }
+  .bar i { display:block; height:100%; background:var(--accent); }
+  svg { width:100%; height:100px; }
+  .back { color:var(--accent); cursor:pointer; }
+  #detail h2 { font-size:14px; margin:8px 0 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Juggler Tracker</h1>
+  <div class="sub">ベルシティザシティ元住吉店 ｜ <span id="meta"></span></div>
+</header>
+<nav id="tabs"></nav>
+<main id="main"></main>
+<script>
+const TABS = [["today","本日の候補"],["all","全台"],["trends","傾向"],["accuracy","的中率"]];
+let cur = "today", D = null;
+
+function pill(p) {
+  if (p == null) return `<span class="pill na">—</span>`;
+  const cls = p >= 0.6 ? "hi" : p >= 0.35 ? "mid" : "low";
+  return `<span class="pill ${cls}">${Math.round(p*100)}%</span>`;
+}
+function fmt(n) { return n == null ? "—" : n.toLocaleString(); }
+function nav() {
+  document.getElementById("tabs").innerHTML = TABS.map(([id,l]) =>
+    `<button class="${id===cur?'on':''}" onclick="go('${id}')">${l}</button>`).join("");
+}
+function go(t) { cur = t; nav(); render(); }
+
+function rowsTable(rows) {
+  return `<div class="tw"><table><thead><tr>
+    <th class="l">台</th><th class="l">機種</th><th>予測P(高)</th><th>朝</th>
+    <th>BIG</th><th>REG</th><th>G数</th><th>合成</th><th>本日推定</th><th>差枚</th>
+  </tr></thead><tbody>
+  ${rows.map(r => {
+    const cls = r.p_latest >= 0.6 ? "hi" : r.p_latest >= 0.35 ? "mid" : "";
+    return `<tr class="${cls}" onclick="unit('${r.cd_dai}')">
+      <td class="l">${r.cd_dai}</td><td class="l">${r.kisyu.replace("ジャグラー","ジャグ")}</td>
+      <td>${pill(r.p_latest)}</td><td>${pill(r.p_morning)}</td>
+      <td>${fmt(r.big)}</td><td>${fmt(r.reg)}</td><td>${fmt(r.games)}</td>
+      <td>${r.gousei ? "1/" + r.gousei : "—"}</td>
+      <td>${r.p_high_today != null ? "設定" + r.ml_setting + (r.reliable ? "" : "?") : "—"}</td>
+      <td>${fmt(r.diff_medal)}</td></tr>`;
+  }).join("")}</tbody></table></div>`;
+}
+
+function render() {
+  const m = document.getElementById("main");
+  if (!D) { m.innerHTML = "<p class='note'>読み込み中…</p>"; return; }
+  if (cur === "today") {
+    const rows = D.rows.filter(r => r.p_latest != null).slice(0, 15);
+    m.innerHTML = `<p class="note">予測P(高設定) 上位15台。朝=規則性による事前予測、日中の収集(12:30/18:30)で実測反映。</p>`
+      + rowsTable(rows);
+  } else if (cur === "all") {
+    m.innerHTML = rowsTable(D.rows);
+  } else if (cur === "trends") {
+    const t = D.trends, dows = ["月","火","水","木","金","土","日"];
+    const bar = (l,p) => `<div>${l} <span style="float:right">${Math.round(p*100)}%</span></div>
+      <div class="bar"><i style="width:${Math.min(p*200,100)}%"></i></div>`;
+    const tu = Object.entries(t.unit||{}).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    m.innerHTML = `<p class="note">高設定投入率（平滑化済み、全体${Math.round(t.base*100)}%、確定台日数${t.n_days}）。蓄積が増えるほど規則性が浮き出ます。</p>
+      <div class="grid">
+        <div class="card"><h3>曜日別</h3>${dows.map((n,i)=>t.dow&&t.dow[i]!=null?bar(n,t.dow[i]):"").join("")}</div>
+        <div class="card"><h3>日付特徴</h3>
+          ${t.event8&&t.event8.true!=null?bar("旧イベ日(8日)",t.event8.true):""}
+          ${t.event8&&t.event8.false!=null?bar("通常日",t.event8.false):""}
+          ${t.day18_28&&t.day18_28.true!=null?bar("18・28日",t.day18_28.true):""}
+          ${t.zorome&&t.zorome.true!=null?bar("ゾロ目",t.zorome.true):""}
+          ${bar("据え置き率",t.carryover)}</div>
+        <div class="card"><h3>機種別</h3>${Object.entries(t.kisyu||{}).map(([k,p])=>bar(k.replace("ジャグラー","ジャグ"),p)).join("")}</div>
+        <div class="card"><h3>台番号別TOP10</h3>${tu.map(([k,p])=>bar(k,p)).join("")}</div>
+      </div>`;
+  } else if (cur === "accuracy") {
+    m.innerHTML = D.accuracy.length === 0
+      ? `<p class="note">まだ採点された予測がありません。夜の確定処理後に表示されます。</p>`
+      : `<div class="tw"><table><thead><tr><th class="l">営業日</th><th>Top5的中</th><th>適合率</th><th>再現率</th><th>実高設定数</th></tr></thead>
+         <tbody>${D.accuracy.map(r => `<tr><td class="l">${r.biz_date}</td>
+           <td>${r.top5_hits}/${r.top5_n}</td>
+           <td>${r.prec!=null?Math.round(r.prec*100)+"%":"—"}</td>
+           <td>${r.recall!=null?Math.round(r.recall*100)+"%":"—"}</td>
+           <td>${r.n_high_actual}</td></tr>`).join("")}</tbody></table></div>`;
+  }
+}
+
+function unit(dai) {
+  const m = document.getElementById("main");
+  const hist = D.history[dai] || [];
+  const pts = D.slump[dai];
+  let graph = "";
+  if (pts && pts.length > 1) {
+    const min = Math.min(...pts, 0), max = Math.max(...pts, 1);
+    const x = i => (i/(pts.length-1)*100).toFixed(1);
+    const y = v => (100-(v-min)/(max-min)*100).toFixed(1);
+    graph = `<div class="card"><h3>${D.biz_date} 差枚 (${pts[pts.length-1]})</h3>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+      <polyline fill="none" stroke="#e8b03c" stroke-width="1.5" points="${pts.map((v,i)=>x(i)+","+y(v)).join(" ")}"/>
+      <line x1="0" x2="100" y1="${y(0)}" y2="${y(0)}" stroke="#3a4453" stroke-width="0.5"/></svg></div>`;
+  }
+  m.innerHTML = `<span class="back" onclick="go(cur)">← 戻る</span>
+    <h2 id="detail">台番 ${dai}（${hist[0] ? hist[0].kisyu || "" : ""}）</h2>${graph}
+    <div class="tw"><table><thead><tr><th class="l">日付</th><th>BIG</th><th>REG</th><th>G数</th><th>差枚</th><th>機械割</th><th>推定</th><th>P(高)</th></tr></thead>
+    <tbody>${hist.map(h => `<tr>
+      <td class="l">${h.biz_date}${h.is_final ? "" : " *"}</td><td>${fmt(h.big)}</td><td>${fmt(h.reg)}</td>
+      <td>${fmt(h.games)}</td><td>${fmt(h.diff_medal)}</td><td>${h.kikaiwari}%</td>
+      <td>${h.ml_setting ? "設定" + h.ml_setting : "—"}</td><td>${pill(h.p_high)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+nav(); render();
+fetch("data.json?t=" + Date.now()).then(r => r.json()).then(d => {
+  D = d;
+  document.getElementById("meta").textContent = `営業日 ${d.biz_date} ｜ 更新 ${d.generated_at.replace("T"," ")}`;
+  render();
+});
+</script>
+</body>
+</html>
