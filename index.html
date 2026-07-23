@@ -63,7 +63,7 @@ function go(t) { cur = t; nav(); render(); }
 
 function rowsTable(rows) {
   return `<div class="tw"><table><thead><tr>
-    <th class="l">台</th><th class="l">機種</th><th>予測P(高)</th><th>朝</th>
+    <th class="l">台</th><th class="l">機種</th><th>P(設定4+)</th><th>朝</th>
     <th>BIG</th><th>REG</th><th>G数</th><th>合成</th><th>本日推定</th><th>差枚</th>
   </tr></thead><tbody>
   ${rows.map(r => {
@@ -73,7 +73,7 @@ function rowsTable(rows) {
       <td>${pill(r.p_latest)}</td><td>${pill(r.p_morning)}</td>
       <td>${fmt(r.big)}</td><td>${fmt(r.reg)}</td><td>${fmt(r.games)}</td>
       <td>${r.gousei ? "1/" + r.gousei : "—"}</td>
-      <td>${r.p_high_today != null ? "設定" + r.ml_setting + (r.reliable ? "" : "?") : "—"}</td>
+      <td>${r.p4_today != null ? "設定" + r.ml_setting + (r.reliable ? "" : "?") : "—"}</td>
       <td>${fmt(r.diff_medal)}</td></tr>`;
   }).join("")}</tbody></table></div>`;
 }
@@ -83,7 +83,7 @@ function render() {
   if (!D) { m.innerHTML = "<p class='note'>読み込み中…</p>"; return; }
   if (cur === "today") {
     const rows = D.rows.filter(r => r.p_latest != null).slice(0, 15);
-    m.innerHTML = `<p class="note">予測P(高設定) 上位15台。朝=規則性による事前予測、日中の収集(12:30/18:30)で実測反映。</p>`
+    m.innerHTML = `<p class="note">P(設定4+)=機械割100%超の見込み、上位15台。朝=台くせによる弱い参考値、日中の収集(12:30/18:30)後は当日実測ベースの「追っかけ」予測。</p>`
       + rowsTable(rows);
   } else if (cur === "all") {
     m.innerHTML = rowsTable(D.rows);
@@ -92,7 +92,7 @@ function render() {
     const bar = (l,p) => `<div>${l} <span style="float:right">${Math.round(p*100)}%</span></div>
       <div class="bar"><i style="width:${Math.min(p*200,100)}%"></i></div>`;
     const tu = Object.entries(t.unit||{}).sort((a,b)=>b[1]-a[1]).slice(0,10);
-    m.innerHTML = `<p class="note">高設定投入率（平滑化済み、全体${Math.round(t.base*100)}%、確定台日数${t.n_days}）。蓄積が増えるほど規則性が浮き出ます。</p>
+    m.innerHTML = `<p class="note">設定4+投入率（平滑化済み、全体${Math.round(t.base*100)}%、確定台日数${t.n_days}）。観測用の参考値です（現状、日をまたぐ規則性は予測に使っていません）。</p>
       <div class="grid">
         <div class="card"><h3>曜日別</h3>${dows.map((n,i)=>t.dow&&t.dow[i]!=null?bar(n,t.dow[i]):"").join("")}</div>
         <div class="card"><h3>日付特徴</h3>
@@ -105,14 +105,16 @@ function render() {
         <div class="card"><h3>台番号別TOP10</h3>${tu.map(([k,p])=>bar(k,p)).join("")}</div>
       </div>`;
   } else if (cur === "accuracy") {
+    const PH = {morning:"朝", intraday:"追っかけ"};
     m.innerHTML = D.accuracy.length === 0
       ? `<p class="note">まだ採点された予測がありません。夜の確定処理後に表示されます。</p>`
-      : `<div class="tw"><table><thead><tr><th class="l">営業日</th><th>Top5的中</th><th>適合率</th><th>再現率</th><th>実高設定数</th></tr></thead>
+      : `<p class="note">的=設定4以上（機械割100%超）。AUC=順位付けの質（0.5=偶然、1.0=完全）。</p>
+         <div class="tw"><table><thead><tr><th class="l">営業日</th><th class="l">予測</th><th>Top3的中</th><th>AUC</th><th>実4+台数</th><th>採点台数</th></tr></thead>
          <tbody>${D.accuracy.map(r => `<tr><td class="l">${r.biz_date}</td>
-           <td>${r.top5_hits}/${r.top5_n}</td>
-           <td>${r.prec!=null?Math.round(r.prec*100)+"%":"—"}</td>
-           <td>${r.recall!=null?Math.round(r.recall*100)+"%":"—"}</td>
-           <td>${r.n_high_actual}</td></tr>`).join("")}</tbody></table></div>`;
+           <td class="l">${PH[r.phase]||r.phase}</td>
+           <td>${r.top3_hits}/${r.top3_n}</td>
+           <td>${r.auc!=null?r.auc.toFixed(2):"—"}</td>
+           <td>${r.n_high_actual}</td><td>${r.n_scored}</td></tr>`).join("")}</tbody></table></div>`;
   }
 }
 
@@ -132,11 +134,11 @@ function unit(dai) {
   }
   m.innerHTML = `<span class="back" onclick="go(cur)">← 戻る</span>
     <h2 id="detail">台番 ${dai}（${hist[0] ? hist[0].kisyu || "" : ""}）</h2>${graph}
-    <div class="tw"><table><thead><tr><th class="l">日付</th><th>BIG</th><th>REG</th><th>G数</th><th>差枚</th><th>機械割</th><th>推定</th><th>P(高)</th></tr></thead>
+    <div class="tw"><table><thead><tr><th class="l">日付</th><th>BIG</th><th>REG</th><th>G数</th><th>差枚</th><th>機械割</th><th>推定</th><th>P(4+)</th></tr></thead>
     <tbody>${hist.map(h => `<tr>
       <td class="l">${h.biz_date}${h.is_final ? "" : " *"}</td><td>${fmt(h.big)}</td><td>${fmt(h.reg)}</td>
       <td>${fmt(h.games)}</td><td>${fmt(h.diff_medal)}</td><td>${h.kikaiwari}%</td>
-      <td>${h.ml_setting ? "設定" + h.ml_setting : "—"}</td><td>${pill(h.p_high)}</td></tr>`).join("")}</tbody></table></div>`;
+      <td>${h.ml_setting ? "設定" + h.ml_setting : "—"}</td><td>${pill(h.p4)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 nav(); render();
