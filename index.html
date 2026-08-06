@@ -36,6 +36,28 @@
   svg { width:100%; height:100px; }
   .back { color:var(--accent); cursor:pointer; }
   #detail h2 { font-size:14px; margin:8px 0 10px; }
+  h2.sec { font-size:13px; color:var(--accent); margin:18px 2px 6px; font-weight:normal; }
+  h2.sec:first-child { margin-top:4px; }
+  .hero { background:linear-gradient(135deg,#2a2013,#1a1f26); border:1px solid #3a3020;
+          border-radius:8px; padding:12px 14px; }
+  .hero .d { font-size:22px; color:var(--accent); }
+  .hero .t { color:var(--dim); font-size:11px; margin-top:3px; line-height:1.6; }
+  .warn { background:rgba(224,82,82,.12); border-left:3px solid var(--hi); border-radius:4px;
+          padding:9px 11px; margin:10px 0; font-size:11px; line-height:1.6; color:#f0d6d6; }
+  .warn b { color:#ff9b9b; }
+  .kpi { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0; }
+  .kpi div { background:var(--panel); border-radius:6px; padding:7px 11px; flex:1; min-width:88px; }
+  .kpi span { display:block; color:var(--dim); font-size:10px; }
+  .kpi b { font-size:16px; font-weight:normal; }
+  td.pos { color:#6ec86e; } td.neg { color:#c86e6e; }
+  .kw { font-variant-numeric:tabular-nums; }
+  .map { font-size:11px; line-height:1.9; }
+  .map div { border-bottom:1px solid #232a33; padding:4px 0; }
+  .map b { color:var(--text); font-weight:normal; }
+  .map i { color:var(--dim); font-style:normal; }
+  .tag { display:inline-block; background:#2a3038; color:var(--dim); border-radius:3px;
+         padding:1px 5px; font-size:10px; margin-left:5px; }
+  .tag.new { background:#2c4a2c; color:#9ede9e; }
 </style>
 </head>
 <body>
@@ -46,8 +68,8 @@
 <nav id="tabs"></nav>
 <main id="main"></main>
 <script>
-const TABS = [["today","本日の候補"],["all","全台"],["trends","傾向"],["accuracy","的中率"]];
-let cur = "today", D = null;
+const TABS = [["event","イベント"],["today","本日の候補"],["cross","機種横断"],["all","全台"],["trends","傾向"],["accuracy","的中率"]];
+let cur = "event", D = null;
 
 function pill(p) {
   if (p == null) return `<span class="pill na">—</span>`;
@@ -78,10 +100,150 @@ function rowsTable(rows) {
   }).join("")}</tbody></table></div>`;
 }
 
+const short = k => k.replace("ジャグラー","ジャグ").replace(/^スマスロ[\s　]*/,"").replace(/^Ｌ[\s　]*|^L[\s　]*/,"");
+function kwCell(v) {
+  const c = v >= 105 ? "pos" : v < 100 ? "neg" : "";
+  return `<td class="kw ${c}">${v.toFixed(1)}%</td>`;
+}
+function diffCell(v) {
+  return `<td class="${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${fmt(v)}</td>`;
+}
+
+function kisyuTable(list) {
+  return `<div class="tw"><table><thead><tr>
+    <th class="l">機種</th><th>台数</th><th>実測機械割</th><th>総差枚</th>
+    <th>プラス台率</th><th>勝率</th><th>平均G</th></tr></thead><tbody>
+    ${list.map(k => {
+      // 数台しか無い機種は1台の大当たり/ハマりで機械割が振れるので参考扱いにする
+      const thin = k.n_units < MIN_UNITS_FOCUS || k.unit_days < MIN_UNITDAYS_FOCUS;
+      return `<tr${thin ? ' style="opacity:.55"' : ''}><td class="l">${short(k.kisyu)}${
+        thin ? '<span class="tag">参考</span>' : ''}</td><td>${k.n_units}</td>
+      ${kwCell(k.kikaiwari)}${diffCell(k.diff)}
+      <td>${Math.round(k.plus_rate*100)}%</td><td>${Math.round(k.win_rate*100)}%</td>
+      <td>${fmt(k.avg_games)}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+}
+
+function unitTable(list) {
+  return `<div class="tw"><table><thead><tr>
+    <th class="l">台</th><th class="l">機種</th><th>累計差枚</th><th>機械割</th>
+    <th>好調日</th><th>日数</th><th>平均G</th></tr></thead><tbody>
+    ${list.map(u => `<tr onclick="unit('${u.cd_dai}')"><td class="l">${u.cd_dai}</td>
+      <td class="l">${short(u.kisyu)}</td>${diffCell(u.diff)}${kwCell(u.kikaiwari)}
+      <td>${u.plus}/${u.days}</td><td>${u.days}</td><td>${fmt(u.avg_games)}</td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+// 十分な母数がある機種だけで、フロア全体平均からの離れ具合を見る
+const MIN_UNITS_FOCUS = 5, MIN_UNITDAYS_FOCUS = 20;
+function focusCallout(F) {
+  const elig = F.kisyu.filter(k => k.n_units >= MIN_UNITS_FOCUS && k.unit_days >= MIN_UNITDAYS_FOCUS);
+  if (elig.length < 2) return "";
+  const g = elig.reduce((a,k) => ({g:a.g+k.games, d:a.d+k.diff}), {g:0,d:0});
+  const avg = (g.g*3+g.d)/(g.g*3)*100;
+  const best = elig[0], worst = elig[elig.length-1];
+  if (best.kikaiwari - worst.kikaiwari < 1.5) return "";
+  return `<div class="card" style="margin:10px 0">
+    <h3>直近の配分から見た狙い目</h3>
+    <div style="line-height:1.8">
+      本命 <b style="color:var(--accent)">${short(best.kisyu)}</b>
+      <span class="kw">${best.kikaiwari.toFixed(1)}%</span>
+      <span class="tag">${best.n_units}台 / プラス台率${Math.round(best.plus_rate*100)}%</span><br>
+      回避 <b style="color:#c86e6e">${short(worst.kisyu)}</b>
+      <span class="kw">${worst.kikaiwari.toFixed(1)}%</span>
+      <span class="tag">${worst.n_units}台 / プラス台率${Math.round(worst.plus_rate*100)}%</span><br>
+      <span style="color:var(--dim);font-size:11px">
+        対象機種平均 ${avg.toFixed(1)}%（${MIN_UNITS_FOCUS}台以上・${MIN_UNITDAYS_FOCUS}台日以上の機種のみ）。
+        現行配置${F.layout.full_days.length}営業日ぶんの実測にすぎないので、8日当日の実測が出たら
+        「本日の候補」の追っかけを優先してください。</span>
+    </div></div>`;
+}
+
+function layoutWarning() {
+  const L = D.floor.layout;
+  if (!L.changed_on) return "";
+  const n = L.full_days.length;
+  return `<div class="warn">
+    <b>${L.changed_on} から現在のラインナップで全面稼働しています。</b>
+    ${L.compared[0]} との比較で、同じ台番が別機種になった台 ${L.moved.length}台 ／
+    新設 ${L.added.length}台 ／ 撤去 ${L.removed.length}台。<br>
+    台番ごとの「くせ」は機種が変わった時点でリセットしています。
+    <b>現行配置での営業実績は${n}営業日（${L.full_days[0]}〜${L.full_days[n-1]}）しかありません。</b>
+    朝の事前予測はほぼ効かないので、<b>当日実測の追っかけを主軸に</b>してください。
+  </div>`;
+}
+
 function render() {
   const m = document.getElementById("main");
   if (!D) { m.innerHTML = "<p class='note'>読み込み中…</p>"; return; }
-  if (cur === "today") {
+  if (cur === "event") {
+    const F = D.floor, ev = D.event_date;
+    const jug = D.rows.filter(r => r.p_latest != null).slice(0, 10);
+    const topUnits = F.units.slice(0, 15);
+    const lift = F.event_lift.filter(x => x.n_event >= 2);
+    const d = new Date(ev + "T00:00:00");
+    const days = Math.round((d - new Date(D.biz_date + "T00:00:00")) / 86400000);
+    m.innerHTML = `
+      <div class="hero">
+        <div class="d">${ev.slice(5).replace("-","/")} イベント日</div>
+        <div class="t">${days === 0 ? "本日" : days + "日後"}（毎月8日）｜
+          直近${F.window_days.length}営業日 ${F.window_days[F.window_days.length-1]}〜${F.window_days[0]} の実績で作成<br>
+          ${F.layout.changed_on ? `うち現行フロア全機種が揃っているのは ${F.layout.changed_on} 以降の${F.layout.full_days.length}営業日` : ""}</div>
+      </div>
+      ${layoutWarning()}
+      ${focusCallout(F)}
+
+      <h2 class="sec">機種別の配分（直近${F.window_days.length}営業日）</h2>
+      <p class="note">実測機械割はIN=3枚/G近似。${F.min_games_unitday}G未満の台日は除外。
+        プラス台率＝機械割${Math.round(F.plus_kikaiwari*100)}%以上だった台日の割合。
+        店がどの機種にプラスを置いているかを見る指標です。
+        <b>「参考」は${MIN_UNITS_FOCUS}台未満または${MIN_UNITDAYS_FOCUS}台日未満</b>で、
+        1台の引きで機械割が大きく振れるため狙い目の根拠にはできません。</p>
+      ${kisyuTable(F.kisyu)}
+
+      <h2 class="sec">ジャグラー 設定4+候補</h2>
+      <p class="note">BIG/REG回数からの設定ベイズ推定。ジャグラーのみスペック表があるので算出できます。</p>
+      ${jug.length ? rowsTable(jug) : `<p class="note">当日データ待ちです。</p>`}
+
+      <h2 class="sec">全機種 好調台（累計差枚 上位）</h2>
+      <p class="note">AT機は設定推定ができないため、差枚と機械割の実測で並べています。</p>
+      ${unitTable(topUnits)}
+
+      <h2 class="sec">過去の8日 vs 通常日</h2>
+      ${lift.length ? `<p class="note">8日の実測機械割と通常日の差。n=台日数。撤去済み機種は除外しています。
+          <b>8日の実績は ${F.layout.changed_on} の配置替え前のもの</b>なので、機種としての傾向は参考になりますが
+          台番の対応は現在と異なります。サンプルも少ないので参考値です。</p>
+        <div class="tw"><table><thead><tr><th class="l">機種</th><th>8日</th><th>通常日</th><th>差</th><th>n(8日)</th><th>n(通常)</th></tr></thead>
+        <tbody>${lift.map(x => `<tr><td class="l">${short(x.kisyu)}</td>
+          ${kwCell(x.event_kikaiwari)}${kwCell(x.other_kikaiwari)}
+          <td class="${x.lift>0?"pos":"neg"}">${x.lift>0?"+":""}${x.lift}</td>
+          <td>${x.n_event}</td><td>${x.n_other}</td></tr>`).join("")}</tbody></table></div>`
+        : `<p class="note">8日の実績が2台日以上ある機種がまだありません。フロア収集は7/16開始のため、
+             非ジャグラー機種の8日データは今回の8/8が初回になります。</p>`}
+
+      <h2 class="sec">現在の配置</h2>
+      <div class="map">${F.floor_map.map(f => {
+        const isNew = F.layout.added.some(a => f.units.includes(a.cd_dai));
+        return `<div><b>${short(f.kisyu)}</b> <i>${f.n}台</i>${isNew?'<span class="tag new">新設含む</span>':''}
+          <br><i>${f.units.join(" ")}</i></div>`;
+      }).join("")}</div>`;
+  } else if (cur === "cross") {
+    const F = D.floor;
+    const tot = F.kisyu.reduce((a,k) => ({g:a.g+k.games, d:a.d+k.diff}), {g:0,d:0});
+    m.innerHTML = `
+      <div class="kpi">
+        <div><span>対象機種</span><b>${F.kisyu.length}</b></div>
+        <div><span>対象台数</span><b>${F.kisyu.reduce((a,k)=>a+k.n_units,0)}</b></div>
+        <div><span>総差枚</span><b class="${tot.d>0?'pos':'neg'}">${fmt(tot.d)}</b></div>
+        <div><span>全体機械割</span><b>${(((tot.g*3+tot.d)/(tot.g*3))*100).toFixed(1)}%</b></div>
+      </div>
+      <p class="note">直近${F.window_days.length}営業日（${F.window_days[F.window_days.length-1]}〜${F.window_days[0]}）。
+        ${F.min_games_unitday}G未満の台日は除外。</p>
+      <h2 class="sec">機種別</h2>
+      ${kisyuTable(F.kisyu)}
+      <h2 class="sec">台別（全機種・累計差枚順）</h2>
+      ${unitTable(F.units)}`;
+  } else if (cur === "today") {
     const rows = D.rows.filter(r => r.p_latest != null).slice(0, 15);
     m.innerHTML = `<p class="note">P(設定4+)=機械割100%超の見込み、上位15台。朝=台くせによる弱い参考値、日中の収集(12:30/18:30)後は当日実測ベースの「追っかけ」予測。</p>`
       + rowsTable(rows);
