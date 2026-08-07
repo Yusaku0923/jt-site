@@ -159,6 +159,40 @@ function focusCallout(F) {
     </div></div>`;
 }
 
+// 抽選番号が出てからの動き方。朝一は台別の根拠が無いので「機種を選ぶ」ことに絞る
+function pickPlan(F) {
+  const P = F.pick_order;
+  if (!P || P.ranked.length < 3) return "";
+  const seats = k => (F.floor_map.find(f => f.kisyu === k.kisyu) || {}).units || [];
+  const jug = P.ranked.filter(k => k.kisyu.includes("ジャグラー"));
+  const top = jug.length >= 3 ? jug : P.ranked;
+  const avoid = P.ranked.filter(k => P.avoid.includes(k.kisyu));
+  const line = (k, i) => `<div style="border-bottom:1px solid #232a33;padding:6px 0">
+      <b style="color:var(--accent)">${i + 1}. ${short(k.kisyu)}</b>
+      <span class="kw" style="float:right">${k.kikaiwari.toFixed(1)}%
+        <span style="color:var(--dim);font-size:10px">(${k.ci_lo}〜${k.ci_hi})</span></span>
+      <br><i style="color:var(--dim);font-size:11px">${k.n_units}台 ${seats(k).join(" ") || ""}</i>
+    </div>`;
+  return `<div class="card" style="margin:10px 0">
+    <h3>抽選番号が出たら（朝一の動き方）</h3>
+    <p class="note" style="margin:0 0 8px">
+      朝一は当日データがゼロで、現行配置も${F.layout.full_days.length}営業日しかないため
+      <b>台単位で狙う根拠はありません</b>。機種だけ選んでください。
+      並びは点推定ではなく<b>95%信頼区間の下限</b>順です（少台数で跳ねた機種を上位に置かないため）。
+    </p>
+    ${top.slice(0, 5).map(line).join("")}
+    ${avoid.length ? `<p class="note" style="margin:8px 0 0">
+      <b style="color:#ff9b9b">避ける: ${avoid.map(k => short(k.kisyu)).join("・")}</b>
+      — 信頼区間の上限が100%を下回っており、このデータ範囲では確からしくマイナスです。
+      台数が多く最後まで空いていますが、空いているから座る対象ではありません。</p>` : ""}
+    <p class="note" style="margin:8px 0 0">
+      <b>番号が悪くて上位機種が埋まっていたら、朝一で無理に座らないでください。</b>
+      当日実測が入る<b>13:45頃</b>にこのページの「本日の候補」タブを見れば、
+      BIG/REG実績からの設定4+推定が出ます。そこから追っかける方が朝一の当てずっぽうより確実です。
+      次の更新は19:45頃です。</p>
+  </div>`;
+}
+
 function floorMap(F, filter) {
   const swapped = new Set(F.layout.moved.map(m => m.cd_dai));
   const list = filter ? F.floor_map.filter(filter) : F.floor_map;
@@ -203,6 +237,7 @@ function render() {
           ${F.layout.changed_on ? `うち現行フロア全機種が揃っているのは ${F.layout.changed_on} 以降の${F.layout.full_days.length}営業日` : ""}</div>
       </div>
       ${layoutWarning()}
+      ${pickPlan(F)}
       ${focusCallout(F)}
 
       <h2 class="sec">機種別の配分（直近${F.window_days.length}営業日）</h2>
