@@ -159,17 +159,29 @@ function focusCallout(F) {
     </div></div>`;
 }
 
+function floorMap(F, filter) {
+  const swapped = new Set(F.layout.moved.map(m => m.cd_dai));
+  const list = filter ? F.floor_map.filter(filter) : F.floor_map;
+  return `<div class="map">${list.map(f => {
+    const n = f.units.filter(u => swapped.has(u)).length;
+    return `<div><b>${short(f.kisyu)}</b> <i>${f.n}台</i>${
+      n ? `<span class="tag new">${n}台が入替</span>` : ''}
+      <br><i>${f.units.join(" ")}</i></div>`;
+  }).join("")}</div>`;
+}
+
 function layoutWarning() {
   const L = D.floor.layout;
   if (!L.changed_on) return "";
   const n = L.full_days.length;
   return `<div class="warn">
     <b>${L.changed_on} から現在のラインナップで全面稼働しています。</b>
-    ${L.compared[0]} との比較で、同じ台番が別機種になった台 ${L.moved.length}台 ／
-    新設 ${L.added.length}台 ／ 撤去 ${L.removed.length}台。<br>
-    台番ごとの「くせ」は機種が変わった時点でリセットしています。
+    同じ台番が別機種になった台は ${L.moved.length}台。
+    台番ごとの「くせ」は機種が変わった時点でリセットしています。<br>
     <b>現行配置での営業実績は${n}営業日（${L.full_days[0]}〜${L.full_days[n-1]}）しかありません。</b>
-    朝の事前予測はほぼ効かないので、<b>当日実測の追っかけを主軸に</b>してください。
+    朝の事前予測はほぼ効かないので、<b>当日実測の追っかけを主軸に</b>してください。<br>
+    <span style="color:var(--dim)">※ 台の増減は出していません。7/28以前は機種一覧ページ経由で収集しており
+    フロアの一部しか取れていなかったため、当時のデータと台数を比較できないためです。</span>
   </div>`;
 }
 
@@ -197,9 +209,10 @@ function render() {
       <p class="note">実測機械割はIN=3枚/G近似。${F.min_games_unitday}G未満の台日は除外。
         プラス台率＝機械割${Math.round(F.plus_kikaiwari*100)}%以上だった台日の割合。
         店がどの機種にプラスを置いているかを見る指標です。
-        <b>「参考」は${MIN_UNITS_FOCUS}台未満または${MIN_UNITDAYS_FOCUS}台日未満</b>で、
-        1台の引きで機械割が大きく振れるため狙い目の根拠にはできません。</p>
-      ${kisyuTable(F.kisyu)}
+        ここでは<b>${MIN_UNITS_FOCUS}台以上</b>の機種のみ表示しています
+        （少台数の機種は1台の引きで機械割が振れるため）。
+        全${F.kisyu.length}機種は「機種横断」タブへ。</p>
+      ${kisyuTable(F.kisyu.filter(k => k.n_units >= MIN_UNITS_FOCUS))}
 
       <h2 class="sec">ジャグラー 設定4+候補</h2>
       <p class="note">BIG/REG回数からの設定ベイズ推定。ジャグラーのみスペック表があるので算出できます。</p>
@@ -221,12 +234,10 @@ function render() {
         : `<p class="note">8日の実績が2台日以上ある機種がまだありません。フロア収集は7/16開始のため、
              非ジャグラー機種の8日データは今回の8/8が初回になります。</p>`}
 
-      <h2 class="sec">現在の配置</h2>
-      <div class="map">${F.floor_map.map(f => {
-        const isNew = F.layout.added.some(a => f.units.includes(a.cd_dai));
-        return `<div><b>${short(f.kisyu)}</b> <i>${f.n}台</i>${isNew?'<span class="tag new">新設含む</span>':''}
-          <br><i>${f.units.join(" ")}</i></div>`;
-      }).join("")}</div>`;
+      <h2 class="sec">ジャグラーの配置</h2>
+      <p class="note">設定推定ができるのはジャグラーだけです。全${F.floor_map.reduce((a,f)=>a+f.n,0)}台
+        ${F.floor_map.length}機種の配置は「機種横断」タブへ。</p>
+      ${floorMap(F, f => f.kisyu.includes("ジャグラー"))}`;
   } else if (cur === "cross") {
     const F = D.floor;
     const tot = F.kisyu.reduce((a,k) => ({g:a.g+k.games, d:a.d+k.diff}), {g:0,d:0});
@@ -239,10 +250,14 @@ function render() {
       </div>
       <p class="note">直近${F.window_days.length}営業日（${F.window_days[F.window_days.length-1]}〜${F.window_days[0]}）。
         ${F.min_games_unitday}G未満の台日は除外。</p>
-      <h2 class="sec">機種別</h2>
+      <h2 class="sec">機種別（全${F.kisyu.length}機種）</h2>
+      <p class="note"><b>「参考」は${MIN_UNITS_FOCUS}台未満または${MIN_UNITDAYS_FOCUS}台日未満</b>で、
+        1台の引きで機械割が大きく振れるため狙い目の根拠にはできません。</p>
       ${kisyuTable(F.kisyu)}
       <h2 class="sec">台別（全機種・累計差枚順）</h2>
-      ${unitTable(F.units)}`;
+      ${unitTable(F.units)}
+      <h2 class="sec">現在の配置（${F.floor_map.reduce((a,f)=>a+f.n,0)}台 / ${F.floor_map.length}機種）</h2>
+      ${floorMap(F)}`;
   } else if (cur === "today") {
     const rows = D.rows.filter(r => r.p_latest != null).slice(0, 15);
     m.innerHTML = `<p class="note">P(設定4+)=機械割100%超の見込み、上位15台。朝=台くせによる弱い参考値、日中の収集(12:30/18:30)後は当日実測ベースの「追っかけ」予測。</p>`
