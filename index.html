@@ -68,8 +68,8 @@
 <nav id="tabs"></nav>
 <main id="main"></main>
 <script>
-const TABS = [["event","イベント"],["today","本日の候補"],["cross","機種横断"],["all","全台"],["trends","傾向"],["accuracy","的中率"]];
-let cur = "event", D = null;
+const TABS = [["daily","日別 打てる機種"],["today","本日の候補"],["cross","機種横断"],["all","全台"],["trends","傾向"],["accuracy","的中率"]];
+let cur = "daily", D = null;
 
 function pill(p) {
   if (p == null) return `<span class="pill na">—</span>`;
@@ -154,7 +154,7 @@ function focusCallout(F) {
       <span class="tag">${worst.n_units}台 / プラス台率${Math.round(worst.plus_rate*100)}%</span><br>
       <span style="color:var(--dim);font-size:11px">
         対象機種平均 ${avg.toFixed(1)}%（${MIN_UNITS_FOCUS}台以上・${MIN_UNITDAYS_FOCUS}台日以上の機種のみ）。
-        現行配置${F.layout.full_days.length}営業日ぶんの実測にすぎないので、8日当日の実測が出たら
+        現行配置${F.layout.full_days.length}営業日ぶんの実測にすぎないので、当日の実測が出たら
         「本日の候補」の追っかけを優先してください。</span>
     </div></div>`;
 }
@@ -193,6 +193,33 @@ function pickPlan(F) {
   </div>`;
 }
 
+const GRADE_COLOR = {"◎":"#7ee2a8","○":"#9ecbff","△":"#d8c98a","✕":"#c86e6e"};
+const DOW = ["月","火","水","木","金","土","日"];
+
+// その日どの機種が打てたか。前日の結果は翌日に伝播しないので朝の台選びには使えない
+function dailyLog(F) {
+  const L = F.daily_picks || [];
+  if (!L.length) return `<p class="note">${F.picks_since} 以降の営業日がまだありません。</p>`;
+  const row = p => `<div style="border-bottom:1px solid #232a33;padding:5px 0${p.thin ? ";opacity:.55" : ""}">
+      <b style="color:${GRADE_COLOR[p.grade]}">${p.grade}</b>
+      <b style="margin-left:6px">${short(p.kisyu)}</b>
+      ${p.thin ? `<span class="tag">参考</span>` : ""}
+      <span class="kw" style="float:right">${p.kikaiwari.toFixed(1)}%</span>
+      <br><i style="color:var(--dim);font-size:11px">${p.n_units}台
+        ／ プラス台率${Math.round(p.plus_rate*100)}%
+        ${p.avg_setting != null ? `／ 推定設定${p.avg_setting.toFixed(2)}` : ""}
+        ／ ${fmt(p.games)}G ${p.diff > 0 ? "+" : ""}${fmt(p.diff)}枚</i>
+    </div>`;
+  return L.map(d => `<div class="card" style="margin:10px 0">
+      <h3>${d.biz_date.slice(5).replace("-","/")}（${DOW[d.dow]}）
+        ${d.is_final ? "" : `<span class="tag new">途中経過</span>`}</h3>
+      <p class="note" style="margin:0 0 6px">
+        稼働 ${fmt(d.games_per_unit)}G/台
+        ${d.avg_setting != null ? `／ ジャグラー推定平均設定 <b>${d.avg_setting.toFixed(2)}</b>` : ""}</p>
+      ${d.picks.map(row).join("")}
+    </div>`).join("");
+}
+
 function floorMap(F, filter) {
   const swapped = new Set(F.layout.moved.map(m => m.cd_dai));
   const list = filter ? F.floor_map.filter(filter) : F.floor_map;
@@ -222,17 +249,20 @@ function layoutWarning() {
 function render() {
   const m = document.getElementById("main");
   if (!D) { m.innerHTML = "<p class='note'>読み込み中…</p>"; return; }
-  if (cur === "event") {
-    const F = D.floor, ev = D.event_date;
+  if (cur === "daily") {
+    const F = D.floor;
     const jug = D.rows.filter(r => r.p_latest != null).slice(0, 10);
     const topUnits = F.units.slice(0, 15);
-    const lift = F.event_lift.filter(x => x.n_event >= 2);
-    const d = new Date(ev + "T00:00:00");
-    const days = Math.round((d - new Date(D.biz_date + "T00:00:00")) / 86400000);
+    // 営業前はprediction側の日付が先行してdaily_picksに当日分がまだ無い。
+    // 前日の数字を当日として出すと追っかけの判断を誤るので日付一致を要求する
+    const today = (F.daily_picks || []).find(d => d.biz_date === D.biz_date);
+    const td = new Date(D.biz_date + "T00:00:00");
     m.innerHTML = `
       <div class="hero">
-        <div class="d">${ev.slice(5).replace("-","/")} イベント日</div>
-        <div class="t">${days === 0 ? "本日" : days + "日後"}（毎月8日）｜
+        <div class="d">${D.biz_date.slice(5).replace("-","/")}（${DOW[(td.getDay()+6)%7]}）${
+          today && !today.is_final ? " 途中経過" : ""}</div>
+        <div class="t">${today ? `稼働 ${fmt(today.games_per_unit)}G/台${
+            today.avg_setting != null ? ` ｜ ジャグラー推定平均設定 ${today.avg_setting.toFixed(2)}` : ""}` : "当日データ待ち"}｜
           直近${F.window_days.length}営業日 ${F.window_days[F.window_days.length-1]}〜${F.window_days[0]} の実績で作成<br>
           ${F.layout.changed_on ? `うち現行フロア全機種が揃っているのは ${F.layout.changed_on} 以降の${F.layout.full_days.length}営業日` : ""}</div>
       </div>
@@ -257,17 +287,14 @@ function render() {
       <p class="note">AT機は設定推定ができないため、差枚と機械割の実測で並べています。</p>
       ${unitTable(topUnits)}
 
-      <h2 class="sec">過去の8日 vs 通常日</h2>
-      ${lift.length ? `<p class="note">8日の実測機械割と通常日の差。n=台日数。撤去済み機種は除外しています。
-          <b>8日の実績は ${F.layout.changed_on} の配置替え前のもの</b>なので、機種としての傾向は参考になりますが
-          台番の対応は現在と異なります。サンプルも少ないので参考値です。</p>
-        <div class="tw"><table><thead><tr><th class="l">機種</th><th>8日</th><th>通常日</th><th>差</th><th>n(8日)</th><th>n(通常)</th></tr></thead>
-        <tbody>${lift.map(x => `<tr><td class="l">${short(x.kisyu)}</td>
-          ${kwCell(x.event_kikaiwari)}${kwCell(x.other_kikaiwari)}
-          <td class="${x.lift>0?"pos":"neg"}">${x.lift>0?"+":""}${x.lift}</td>
-          <td>${x.n_event}</td><td>${x.n_other}</td></tr>`).join("")}</tbody></table></div>`
-        : `<p class="note">8日の実績が2台日以上ある機種がまだありません。フロア収集は7/16開始のため、
-             非ジャグラー機種の8日データは今回の8/8が初回になります。</p>`}
+      <h2 class="sec">日別 打てる機種（${F.picks_since} 以降）</h2>
+      <p class="note">その日の実測機械割で ◎105%以上 / ○100%以上 / △97%以上 / ✕それ未満。
+        ${F.min_games_unitday}G未満の台日は除外、現行フロアに無い機種は出していません。
+        <b>${F.min_units_pick}台未満の機種は「参考」</b>（1台の引きで機械割が振れるため）。<br>
+        <b>これは事後の実測なので、翌日の台選びには使えません。</b>
+        同一台の前日→翌日の差枚相関はほぼゼロ（r=-0.01, n=2,259台日）で、
+        「昨日出ていたから今日も」は成立しませんでした。用途は<b>当日の追っかけ</b>と振り返りです。</p>
+      ${dailyLog(F)}
 
       <h2 class="sec">ジャグラーの配置</h2>
       <p class="note">設定推定ができるのはジャグラーだけです。全${F.floor_map.reduce((a,f)=>a+f.n,0)}台
